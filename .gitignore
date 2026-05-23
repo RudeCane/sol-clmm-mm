@@ -1,0 +1,7 @@
+/target
+config.toml
+*.json
+!package*.json
+wallet*.json
+*.key
+.env

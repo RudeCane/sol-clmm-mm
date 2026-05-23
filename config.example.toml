@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# Copy this to config.toml and edit. config.toml is gitignored.
+# ---------------------------------------------------------------------------
+
+# Which venue: "simulated" | "orca" | "raydium"
+# Start with "simulated" — it runs the full bot + dashboard with no SDK, no
+# RPC, and no funds.
+venue = "simulated"
+
+# ---- Real-venue settings (ignored when venue = "simulated") ----------------
+rpc_url     = "https://api.mainnet-beta.solana.com"
+pool        = ""                       # CLMM pool address
+wallet_path = ""                       # path to Solana keypair JSON (NEVER commit)
+
+# ---- Strategy --------------------------------------------------------------
+# Half-width of the LP range in basis points. 250 = +/-2.5% around price.
+half_width_bps = 250
+
+# Price must drift this far PAST a range edge before we recenter. A buffer
+# beyond the edge prevents thrashing right at the boundary. 50 = 0.5%.
+rebalance_trigger_bps = 50
+
+# Minimum seconds between recenters regardless of price. Anti-fee-bleed.
+rebalance_cooldown_secs = 300
+
+# Loop interval (seconds).
+loop_interval_secs = 10
+
+# ---- Safety ----------------------------------------------------------------
+# TRUE = never send transactions, only log intended actions. Defaults to true.
+# Flip to false ONLY when you've wired a real venue and tested on devnet.
+dry_run = true
+
+# ---- Simulator-only --------------------------------------------------------
+sim_start_price = 100.0
+
+# ---- Dashboard -------------------------------------------------------------
+web_port = 8787

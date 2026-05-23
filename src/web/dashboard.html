@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CLMM-MM · control</title>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --panel: #11151c;
+    --panel-2: #161b24;
+    --line: #1f2733;
+    --ink: #c9d4e0;
+    --ink-dim: #6b7888;
+    --green: #34d399;
+    --red: #f87171;
+    --amber: #fbbf24;
+    --accent: #38bdf8;
+    --mono: "Berkeley Mono","JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--mono); font-size: 13px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 20px; }
+  header {
+    display:flex; align-items:baseline; justify-content:space-between;
+    border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:16px;
+  }
+  h1 { font-size:14px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; margin:0; }
+  .venue-tag { color:var(--ink-dim); font-size:11px; letter-spacing:.1em; }
+  .pill {
+    display:inline-block; padding:2px 8px; border:1px solid var(--line);
+    border-radius:2px; font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+  }
+  .pill.run { color:var(--green); border-color:#1d3a30; background:#0e1a16; }
+  .pill.stop { color:var(--ink-dim); }
+  .pill.dry { color:var(--amber); border-color:#3a3018; background:#1a1610; margin-left:6px; }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:16px; }
+  .card {
+    background:var(--panel); border:1px solid var(--line); border-radius:3px; padding:12px 14px;
+  }
+  .card .k { color:var(--ink-dim); font-size:10px; letter-spacing:.12em; text-transform:uppercase; margin-bottom:6px; }
+  .card .v { font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .v.green { color:var(--green); } .v.red { color:var(--red); } .v.amber { color:var(--amber); }
+  .range {
+    background:var(--panel); border:1px solid var(--line); border-radius:3px;
+    padding:16px; margin-bottom:16px;
+  }
+  .range-head { display:flex; justify-content:space-between; color:var(--ink-dim);
+    font-size:10px; letter-spacing:.12em; text-transform:uppercase; margin-bottom:14px; }
+  .track { position:relative; height:8px; background:var(--panel-2); border-radius:4px; }
+  .band { position:absolute; top:0; bottom:0; background:#13313f; border-radius:4px; }
+  .marker { position:absolute; top:-4px; width:2px; height:16px; background:var(--accent);
+    box-shadow:0 0 8px var(--accent); transition:left .4s ease; }
+  .marker.out { background:var(--red); box-shadow:0 0 8px var(--red); }
+  .bounds { display:flex; justify-content:space-between; margin-top:10px;
+    font-size:12px; font-variant-numeric:tabular-nums; }
+  .bounds .lo,.bounds .hi { color:var(--ink-dim); }
+  .bounds .mid { color:var(--ink); font-weight:600; }
+  .controls { display:flex; gap:8px; margin-bottom:16px; }
+  button {
+    font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+    background:var(--panel-2); color:var(--ink); border:1px solid var(--line);
+    padding:9px 16px; border-radius:3px; cursor:pointer; transition:all .15s;
+  }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  button.primary { background:#0e1a16; border-color:#1d3a30; color:var(--green); }
+  button.danger:hover { border-color:var(--red); color:var(--red); }
+  button:disabled { opacity:.35; cursor:not-allowed; }
+  .log {
+    background:#08090c; border:1px solid var(--line); border-radius:3px;
+    height:240px; overflow-y:auto; padding:10px 12px; font-size:12px;
+  }
+  .log .row { display:flex; gap:10px; padding:2px 0; border-bottom:1px solid #0d1016; }
+  .log .ts { color:var(--ink-dim); white-space:nowrap; }
+  .log .lv { width:48px; text-transform:uppercase; font-size:10px; padding-top:1px; }
+  .lv.info{color:var(--accent);} .lv.warn{color:var(--amber);} .lv.error{color:var(--red);}
+  .log .mg { color:var(--ink); }
+  .conn { font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+  .conn.ok{color:var(--green);} .conn.down{color:var(--red);}
+  .sub { color:var(--ink-dim); font-size:10px; margin-top:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>CLMM Market Maker</h1>
+      <div class="venue-tag" id="venue">venue: —</div>
+    </div>
+    <div style="text-align:right;">
+      <span class="pill stop" id="status">stopped</span>
+      <span class="pill dry" id="drypill" style="display:none;">dry-run</span>
+      <div class="conn down" id="conn" style="margin-top:8px;">● disconnected</div>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card"><div class="k">Price</div><div class="v" id="price">—</div></div>
+    <div class="card"><div class="k">Range Status</div><div class="v" id="rangestat">—</div></div>
+    <div class="card"><div class="k">Realized PnL (B)</div><div class="v" id="pnl">—</div></div>
+    <div class="card"><div class="k">Rebalance Cost (B)</div><div class="v" id="cost">—</div></div>
+  </div>
+
+  <div class="range">
+    <div class="range-head">
+      <span>Position Range</span>
+      <span id="rebalances">rebalances: 0</span>
+    </div>
+    <div class="track" id="track">
+      <div class="band" id="band"></div>
+      <div class="marker" id="marker"></div>
+    </div>
+    <div class="bounds">
+      <span class="lo" id="lo">lower —</span>
+      <span class="mid" id="mid">price —</span>
+      <span class="hi" id="hi">upper —</span>
+    </div>
+    <div class="sub" id="inv">inventory —</div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="btnStart">Start</button>
+    <button class="danger" id="btnStop" disabled>Stop</button>
+    <button id="btnRecenter">Recenter Now</button>
+  </div>
+
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+  let ws, connected = false;
+  const $ = id => document.getElementById(id);
+
+  function connect() {
+    ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onopen = () => { connected = true; setConn(true); };
+    ws.onclose = () => { connected = false; setConn(false); setTimeout(connect, 1500); };
+    ws.onerror = () => { ws.close(); };
+    ws.onmessage = e => { try { render(JSON.parse(e.data)); } catch(_){} };
+  }
+  function setConn(ok){
+    const c = $('conn');
+    c.className = 'conn ' + (ok?'ok':'down');
+    c.textContent = ok ? '● connected' : '● disconnected';
+  }
+  function send(cmd){ if(connected) ws.send(JSON.stringify({cmd})); }
+
+  $('btnStart').onclick = () => send('start');
+  $('btnStop').onclick = () => send('stop');
+  $('btnRecenter').onclick = () => send('recenter');
+
+  function fmt(n, d=4){ return (n==null||isNaN(n)) ? '—' : Number(n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}); }
+
+  function render(s){
+    $('venue').textContent = 'venue: ' + (s.venue||'—');
+    const st = $('status');
+    st.textContent = s.running ? 'running' : 'stopped';
+    st.className = 'pill ' + (s.running ? 'run' : 'stop');
+    $('drypill').style.display = s.dry_run ? 'inline-block' : 'none';
+    $('btnStart').disabled = s.running;
+    $('btnStop').disabled = !s.running;
+
+    const p = s.pool;
+    if(p){
+      $('price').textContent = fmt(p.price);
+      $('mid').textContent = 'price ' + fmt(p.price);
+      const rs = $('rangestat');
+      rs.textContent = s.in_range ? 'IN RANGE' : 'OUT';
+      rs.className = 'v ' + (s.in_range ? 'green' : 'red');
+      if(p.range_lower!=null && p.range_upper!=null){
+        $('lo').textContent = 'lower ' + fmt(p.range_lower);
+        $('hi').textContent = 'upper ' + fmt(p.range_upper);
+        drawTrack(p.range_lower, p.range_upper, p.price, s.in_range);
+      }
+      $('inv').textContent = `inventory: A ${fmt(p.inventory_a)} · B ${fmt(p.inventory_b,2)} · fees ${fmt(p.fees_accrued_b,2)} B`;
+    }
+    const pnl = $('pnl'); pnl.textContent = fmt(s.cum_realized_pnl_b,2);
+    pnl.className = 'v ' + (s.cum_realized_pnl_b>=0?'green':'red');
+    $('cost').textContent = fmt(s.cum_cost_b,2);
+    $('rebalances').textContent = 'rebalances: ' + (s.rebalances||0);
+
+    renderLog(s.log||[]);
+  }
+
+  function drawTrack(lo, hi, price, inRange){
+    // pad the visual window 20% beyond each edge
+    const pad = (hi-lo)*0.5;
+    const min = lo-pad, max = hi+pad, span = max-min;
+    const pct = x => Math.max(0, Math.min(100, ((x-min)/span)*100));
+    const band = $('band'), marker = $('marker');
+    band.style.left = pct(lo)+'%';
+    band.style.width = (pct(hi)-pct(lo))+'%';
+    marker.style.left = pct(price)+'%';
+    marker.className = 'marker' + (inRange ? '' : ' out');
+  }
+
+  let lastLogLen = 0;
+  function renderLog(log){
+    if(log.length === lastLogLen) return;
+    lastLogLen = log.length;
+    const el = $('log');
+    el.innerHTML = log.slice().reverse().map(r => {
+      const t = new Date(r.ts*1000).toLocaleTimeString();
+      return `<div class="row"><span class="ts">${t}</span><span class="lv ${r.level}">${r.level}</span><span class="mg">${escape(r.msg)}</span></div>`;
+    }).join('');
+  }
+  function escape(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+  connect();
+</script>
+</body>
+</html>
