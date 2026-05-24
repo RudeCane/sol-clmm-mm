@@ -33,8 +33,8 @@ use std::sync::Arc;
 
 use orca_whirlpools::{
     close_position_instructions, fetch_concentrated_liquidity_pool, fetch_positions_for_owner,
-    open_position_instructions, IncreaseLiquidityParam, OpenPositionConfig, PoolInfo,
-    PositionOrBundle,
+    open_position_instructions, ClosePositionConfig, IncreaseLiquidityParam, OpenPositionConfig,
+    PoolInfo, PositionOrBundle,
 };
 use orca_whirlpools_core::{tick_index_to_price, try_get_token_estimates_from_liquidity};
 use solana_client::nonblocking::rpc_client::RpcClient;
@@ -236,8 +236,11 @@ impl Venue for OrcaVenue {
         let close = close_position_instructions(
             &self.rpc,
             position_mint,
-            Some(self.slippage_bps),
-            Some(self.wallet.pubkey()),
+            ClosePositionConfig {
+                slippage_tolerance_bps: Some(self.slippage_bps),
+                authority: Some(self.wallet.pubkey()),
+                whirlpool_deployment: None,
+            },
         )
         .await
         .map_err(|e| anyhow!("close_position_instructions: {e}"))?;
