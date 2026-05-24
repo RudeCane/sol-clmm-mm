@@ -44,9 +44,10 @@ pub fn build(cfg: &Config) -> Result<Arc<dyn Venue>> {
                     cfg.orca_deposit_max_a,
                     cfg.orca_deposit_max_b,
                     cfg.orca_slippage_bps,
+                    &cfg.orca_network,
                     wallet,
                     cfg.dry_run,
-                )))
+                )?))
             }
             #[cfg(not(feature = "orca"))]
             {

@@ -23,6 +23,7 @@ orca_decimals_b  = 6    # decimals of token B
 orca_deposit_max_a = 0  # max token A to deposit per position (raw base units)
 orca_deposit_max_b = 1000000  # max token B to deposit (raw base units; e.g. 1 USDC = 1_000_000)
 orca_slippage_bps  = 100  # slippage tolerance for open/close (100 = 1%)
+orca_network = "mainnet"  # "mainnet" | "devnet" — MUST match rpc_url's cluster
 
 # ---- Strategy --------------------------------------------------------------
 # Half-width of the LP range in basis points. 250 = +/-2.5% around price.

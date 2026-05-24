@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------------------
+# Devnet dry-run config for the Orca venue.
+# Copy this to config.toml:  copy config.devnet.toml config.toml
+# Then set wallet_path to a THROWAWAY devnet keypair and run:
+#   cargo run --features orca
+# Leave dry_run = true until you've watched a clean dry-run in the dashboard.
+# ---------------------------------------------------------------------------
+
+venue   = "orca"
+rpc_url = "https://api.devnet.solana.com"
+
+# CRITICAL: must match the cluster. Wrong network = pool lookups fail.
+orca_network = "devnet"
+
+# Throwaway devnet keypair (Solana CLI JSON byte-array format). NEVER a real key.
+# Create one:  solana-keygen new -o devnet-throwaway.json
+# Fund it:     solana airdrop 2 <pubkey> --url devnet
+wallet_path = "devnet-throwaway.json"
+
+# Verified devnet SOL / devUSDC pool (tick spacing 64).
+orca_token_a      = "So11111111111111111111111111111111111111112"   # wSOL
+orca_token_b      = "BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k"   # devUSDC
+orca_tick_spacing = 64
+orca_decimals_a   = 9   # SOL
+orca_decimals_b   = 6   # devUSDC
+
+# Small deposits for testing. devUSDC has 6 decimals: 1_000_000 = 1 devUSDC.
+orca_deposit_max_a = 0
+orca_deposit_max_b = 1000000
+orca_slippage_bps  = 100
+
+# ---- Strategy ----
+half_width_bps          = 250
+rebalance_trigger_bps   = 50
+rebalance_cooldown_secs = 300
+loop_interval_secs      = 10
+
+# ---- Safety: keep TRUE for the first runs ----
+dry_run = true
+
+# ---- Dashboard ----
+web_port = 8787

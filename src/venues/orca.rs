@@ -34,7 +34,7 @@ use std::sync::Arc;
 use orca_whirlpools::{
     close_position_instructions, fetch_concentrated_liquidity_pool, fetch_positions_for_owner,
     open_position_instructions, ClosePositionConfig, IncreaseLiquidityParam, OpenPositionConfig,
-    PoolInfo, PositionOrBundle,
+    PoolInfo, PositionOrBundle, WhirlpoolDeployment,
 };
 use orca_whirlpools_core::{tick_index_to_price, try_get_token_estimates_from_liquidity};
 use solana_client::nonblocking::rpc_client::RpcClient;
@@ -57,6 +57,9 @@ pub struct OrcaVenue {
     deposit_max_b: u64,
     /// Slippage tolerance in bps for open/close quotes.
     slippage_bps: u16,
+    /// Which WhirlpoolsConfig deployment to resolve pools against. Passed into
+    /// every fetch/instruction call (8.0.0 has no global config setter).
+    deployment: WhirlpoolDeployment,
     wallet: Arc<Keypair>,
     dry_run: bool,
 }
@@ -73,10 +76,20 @@ impl OrcaVenue {
         deposit_max_a: u64,
         deposit_max_b: u64,
         slippage_bps: u16,
+        network: &str,
         wallet: Arc<Keypair>,
         dry_run: bool,
-    ) -> Self {
-        Self {
+    ) -> anyhow::Result<Self> {
+        // 8.0.0 selects the WhirlpoolsConfig per-call via WhirlpoolDeployment
+        // (no global setter). Build it from the configured network; must match
+        // the rpc_url's cluster.
+        let deployment = match network {
+            "devnet" => WhirlpoolDeployment::devnet(),   // VERIFIED constructor
+            "mainnet" => WhirlpoolDeployment::mainnet(),  // VERIFIED constructor
+            other => bail!("unknown orca_network '{other}' (use mainnet|devnet)"),
+        };
+
+        Ok(Self {
             rpc: RpcClient::new(rpc_url),
             token_a,
             token_b,
@@ -86,9 +99,10 @@ impl OrcaVenue {
             deposit_max_a,
             deposit_max_b,
             slippage_bps,
+            deployment,
             wallet,
             dry_run,
-        }
+        })
     }
 }
 
@@ -106,7 +120,7 @@ impl Venue for OrcaVenue {
             self.token_a,
             self.token_b,
             self.tick_spacing,
-            None,
+            Some(self.deployment.clone()),
         )
         .await
         .map_err(|e| anyhow!("fetch_concentrated_liquidity_pool: {e}"))?;
@@ -204,7 +218,7 @@ impl Venue for OrcaVenue {
         let config = OpenPositionConfig {
             slippage_tolerance_bps: Some(self.slippage_bps),
             funder: Some(self.wallet.pubkey()),
-            whirlpool_deployment: None,
+            whirlpool_deployment: Some(self.deployment.clone()),
         };
 
         let pool = self.pool_address().await?;
@@ -239,7 +253,7 @@ impl Venue for OrcaVenue {
             ClosePositionConfig {
                 slippage_tolerance_bps: Some(self.slippage_bps),
                 authority: Some(self.wallet.pubkey()),
-                whirlpool_deployment: None,
+                whirlpool_deployment: Some(self.deployment.clone()),
             },
         )
         .await
@@ -255,7 +269,7 @@ impl Venue for OrcaVenue {
         let config = OpenPositionConfig {
             slippage_tolerance_bps: Some(self.slippage_bps),
             funder: Some(self.wallet.pubkey()),
-            whirlpool_deployment: None,
+            whirlpool_deployment: Some(self.deployment.clone()),
         };
         let open = open_position_instructions(&self.rpc, pool_addr, lower, upper, param, config)
             .await
@@ -332,7 +346,7 @@ impl OrcaVenue {
             self.token_a,
             self.token_b,
             self.tick_spacing,
-            None,
+            Some(self.deployment.clone()),
         )
         .await
         .map_err(|e| anyhow!("fetch pool: {e}"))?

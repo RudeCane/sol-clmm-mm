@@ -59,6 +59,11 @@ pub struct Config {
     /// Slippage tolerance (bps) for open/close quotes.
     #[serde(default = "default_slippage")]
     pub orca_slippage_bps: u16,
+    /// Orca network config: "mainnet" | "devnet" | "eclipse_mainnet" |
+    /// "eclipse_testnet". Selects which WhirlpoolsConfig the SDK resolves pools
+    /// against. MUST match your rpc_url's cluster or pool lookups will fail.
+    #[serde(default = "default_orca_network")]
+    pub orca_network: String,
 
     /// Path to the wallet keypair JSON (Solana CLI format). Never committed.
     #[serde(default)]
@@ -105,6 +110,7 @@ fn default_dry_run() -> bool { true }
 fn default_sim_price() -> f64 { 100.0 }
 fn default_port() -> u16 { 8787 }
 fn default_slippage() -> u16 { 100 }
+fn default_orca_network() -> String { "mainnet".into() }
 
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
