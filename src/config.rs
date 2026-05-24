@@ -17,6 +17,9 @@ pub enum VenueKind {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+// Several fields (pool, orca_*, wallet_path) are only read under venue feature
+// flags; serde always populates them, so silence dead_code in the default build.
+#[allow(dead_code)]
 pub struct Config {
     /// Which venue to run.
     pub venue: VenueKind,
@@ -28,6 +31,24 @@ pub struct Config {
     /// CLMM pool address (ignored by the simulator).
     #[serde(default)]
     pub pool: String,
+
+    // ---- Orca-specific: the high-level SDK resolves a pool by token pair +
+    // tick spacing, not a pool address. ----
+    /// Token A mint (base).
+    #[serde(default)]
+    pub orca_token_a: String,
+    /// Token B mint (quote).
+    #[serde(default)]
+    pub orca_token_b: String,
+    /// Pool tick spacing (e.g. 64).
+    #[serde(default)]
+    pub orca_tick_spacing: u16,
+    /// Decimals of token A.
+    #[serde(default)]
+    pub orca_decimals_a: u8,
+    /// Decimals of token B.
+    #[serde(default)]
+    pub orca_decimals_b: u8,
 
     /// Path to the wallet keypair JSON (Solana CLI format). Never committed.
     #[serde(default)]
@@ -98,16 +119,30 @@ impl Config {
         Ok(())
     }
 
-    /// Load the pool pubkey and wallet keypair. Used by real venues only.
-    pub fn load_pool_and_wallet(&self) -> Result<(Pubkey, Arc<Keypair>)> {
-        let pool = Pubkey::from_str(&self.pool)
-            .with_context(|| format!("invalid pool pubkey: {}", self.pool))?;
+    /// Load just the wallet keypair. Used by venues that resolve the pool by
+    /// other means (e.g. Orca by token pair).
+    ///
+    /// NOTE: returns the Solana *v2* `Keypair` (solana_sdk). Under
+    /// `--features orca` the crate migrates to Solana v3 (see Cargo.toml note),
+    /// at which point this becomes `solana_keypair::Keypair`. Kept v2 here so
+    /// the default simulator build compiles unchanged.
+    #[allow(dead_code)]
+    pub fn load_wallet(&self) -> Result<Arc<Keypair>> {
         let bytes = std::fs::read_to_string(&self.wallet_path)
             .with_context(|| format!("reading wallet {}", self.wallet_path))?;
         let key_bytes: Vec<u8> =
             serde_json::from_str(&bytes).context("wallet file must be a JSON byte array")?;
         let wallet = Keypair::from_bytes(&key_bytes).context("invalid keypair bytes")?;
         tracing::info!(pubkey = %wallet.pubkey(), "wallet loaded");
-        Ok((pool, Arc::new(wallet)))
+        Ok(Arc::new(wallet))
+    }
+
+    /// Load the pool pubkey and wallet keypair. Used by real venues only.
+    #[allow(dead_code)]
+    pub fn load_pool_and_wallet(&self) -> Result<(Pubkey, Arc<Keypair>)> {
+        let pool = Pubkey::from_str(&self.pool)
+            .with_context(|| format!("invalid pool pubkey: {}", self.pool))?;
+        let wallet = self.load_wallet()?;
+        Ok((pool, wallet))
     }
 }

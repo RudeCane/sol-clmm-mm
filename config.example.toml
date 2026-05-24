@@ -9,8 +9,17 @@ venue = "simulated"
 
 # ---- Real-venue settings (ignored when venue = "simulated") ----------------
 rpc_url     = "https://api.mainnet-beta.solana.com"
-pool        = ""                       # CLMM pool address
+pool        = ""                       # CLMM pool address (Raydium path)
 wallet_path = ""                       # path to Solana keypair JSON (NEVER commit)
+
+# ---- Orca-specific (used when venue = "orca", build with --features orca) ---
+# The Orca high-level SDK resolves a pool by token pair + tick spacing,
+# not by a pool address.
+orca_token_a     = ""   # base token mint
+orca_token_b     = ""   # quote token mint
+orca_tick_spacing = 64  # pool tick spacing (e.g. 64)
+orca_decimals_a  = 9    # decimals of token A
+orca_decimals_b  = 6    # decimals of token B
 
 # ---- Strategy --------------------------------------------------------------
 # Half-width of the LP range in basis points. 250 = +/-2.5% around price.

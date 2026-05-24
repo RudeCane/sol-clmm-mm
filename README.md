@@ -26,15 +26,25 @@ WebSocket.
 | Venue | Status |
 |---|---|
 | **Simulated** | ✅ Fully working. Real price walk, real position, real IL realized on recenter, real (configurable) fees. The entire bot + UI runs against this today. |
-| **Orca Whirlpools** | 🔧 Wiring template. Trait is implemented; each on-chain call is a clearly-marked `todo!()` with notes on which SDK call goes where. |
-| **Raydium CLMM** | 🔧 Wiring template. Same as Orca. |
+| **Orca Whirlpools** | 🟡 `fetch_state` wired against the real `orca_whirlpools` 8.0.0 API (pool fetch + position fetch). Liquidity→token-amount conversion and the open/close/recenter instruction sending are still TODO. Build with `--features orca`. |
+| **Raydium CLMM** | 🔧 Wiring template. Trait implemented; on-chain calls are marked TODO. Build with `--features raydium`. |
 
-The Orca/Raydium files are **not compile-tested against the real SDKs** and were
-deliberately not written from memory — the SDK 7.x surface shifts between point
-releases, so guessed calls would compile-fail in subtle ways. You fill the
-`todo!()` bodies against the actual crate docs for the version in your
-`Cargo.lock` (or paste from your existing v0.2). Everything *around* those calls
-— the engine contract, state, dashboard, safety — is final.
+### Building the Orca path
+
+The default build is the **simulator only** — no Solana SDK, compiles clean:
+
+```
+cargo build            # simulator
+cargo build --features orca   # real Orca path (see version note below)
+```
+
+⚠️ `orca_whirlpools` 8.0.0 requires the **Solana v3** crates, while the default
+build pins **Solana v2** for the simulator. You can't have both in one build.
+`Cargo.toml` has a step-by-step note for migrating the crate to v3 (swap
+`solana_sdk::pubkey::Pubkey` → `solana_pubkey::Pubkey` etc.). Until you do that
+migration, `--features orca` will not compile — this is called out honestly
+rather than hidden, because it's a real dependency conflict you resolve once on
+your machine where you can run `cargo update`.
 
 ---
 

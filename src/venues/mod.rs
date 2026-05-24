@@ -6,7 +6,9 @@
 //! real venue impl should keep sqrt-price / tick math in integer space and
 //! only convert at this boundary.
 
+#[cfg(feature = "orca")]
 pub mod orca;
+#[cfg(feature = "raydium")]
 pub mod raydium;
 pub mod simulated;
 
@@ -24,22 +26,48 @@ pub fn build(cfg: &Config) -> Result<Arc<dyn Venue>> {
             Ok(Arc::new(simulated::SimulatedVenue::new(cfg.sim_start_price)))
         }
         VenueKind::Orca => {
-            let (pool, wallet) = cfg.load_pool_and_wallet()?;
-            Ok(Arc::new(orca::OrcaVenue::new(
-                cfg.rpc_url.clone(),
-                pool,
-                wallet,
-                cfg.dry_run,
-            )))
+            #[cfg(feature = "orca")]
+            {
+                use std::str::FromStr;
+                let wallet = cfg.load_wallet()?;
+                let token_a = solana_pubkey::Pubkey::from_str(&cfg.orca_token_a)
+                    .map_err(|e| anyhow::anyhow!("orca_token_a: {e}"))?;
+                let token_b = solana_pubkey::Pubkey::from_str(&cfg.orca_token_b)
+                    .map_err(|e| anyhow::anyhow!("orca_token_b: {e}"))?;
+                Ok(Arc::new(orca::OrcaVenue::new(
+                    cfg.rpc_url.clone(),
+                    token_a,
+                    token_b,
+                    cfg.orca_tick_spacing,
+                    cfg.orca_decimals_a,
+                    cfg.orca_decimals_b,
+                    wallet,
+                    cfg.dry_run,
+                )))
+            }
+            #[cfg(not(feature = "orca"))]
+            {
+                anyhow::bail!(
+                    "venue = \"orca\" requires building with --features orca \
+                     (pulls in orca_whirlpools 8.0.0 + Solana v3 crates)"
+                )
+            }
         }
         VenueKind::Raydium => {
-            let (pool, wallet) = cfg.load_pool_and_wallet()?;
-            Ok(Arc::new(raydium::RaydiumVenue::new(
-                cfg.rpc_url.clone(),
-                pool,
-                wallet,
-                cfg.dry_run,
-            )))
+            #[cfg(feature = "raydium")]
+            {
+                let (pool, wallet) = cfg.load_pool_and_wallet()?;
+                Ok(Arc::new(raydium::RaydiumVenue::new(
+                    cfg.rpc_url.clone(),
+                    pool,
+                    wallet,
+                    cfg.dry_run,
+                )))
+            }
+            #[cfg(not(feature = "raydium"))]
+            {
+                anyhow::bail!("venue = \"raydium\" requires building with --features raydium")
+            }
         }
     }
 }
