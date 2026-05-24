@@ -18,13 +18,14 @@
 use super::{PoolState, RebalanceReceipt, Venue};
 use anyhow::{bail, Result};
 use async_trait::async_trait;
-use solana_sdk::pubkey::Pubkey;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
 use std::sync::Arc;
 
 pub struct RaydiumVenue {
     pub rpc_url: String,
     pub pool: Pubkey,
-    pub wallet: Arc<solana_sdk::signature::Keypair>,
+    pub wallet: Arc<Keypair>,
     pub dry_run: bool,
 }
 
@@ -32,7 +33,7 @@ impl RaydiumVenue {
     pub fn new(
         rpc_url: String,
         pool: Pubkey,
-        wallet: Arc<solana_sdk::signature::Keypair>,
+        wallet: Arc<Keypair>,
         dry_run: bool,
     ) -> Self {
         Self { rpc_url, pool, wallet, dry_run }

@@ -3,8 +3,9 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::{Keypair, Signer};
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -120,19 +121,17 @@ impl Config {
     }
 
     /// Load just the wallet keypair. Used by venues that resolve the pool by
-    /// other means (e.g. Orca by token pair).
-    ///
-    /// NOTE: returns the Solana *v2* `Keypair` (solana_sdk). Under
-    /// `--features orca` the crate migrates to Solana v3 (see Cargo.toml note),
-    /// at which point this becomes `solana_keypair::Keypair`. Kept v2 here so
-    /// the default simulator build compiles unchanged.
+    /// other means (e.g. Orca by token pair). Returns the Solana v3
+    /// `solana_keypair::Keypair`.
     #[allow(dead_code)]
     pub fn load_wallet(&self) -> Result<Arc<Keypair>> {
         let bytes = std::fs::read_to_string(&self.wallet_path)
             .with_context(|| format!("reading wallet {}", self.wallet_path))?;
         let key_bytes: Vec<u8> =
             serde_json::from_str(&bytes).context("wallet file must be a JSON byte array")?;
-        let wallet = Keypair::from_bytes(&key_bytes).context("invalid keypair bytes")?;
+        // v3 split crates removed Keypair::from_bytes; use try_from(&[u8]).
+        let wallet = Keypair::try_from(&key_bytes[..])
+            .map_err(|e| anyhow::anyhow!("invalid keypair bytes: {e}"))?;
         tracing::info!(pubkey = %wallet.pubkey(), "wallet loaded");
         Ok(Arc::new(wallet))
     }

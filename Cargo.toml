@@ -6,14 +6,11 @@ description = "Self-hosted concentrated-liquidity market maker for Solana (Orca 
 license = "MIT"
 
 [features]
-# Default build is the SIMULATOR ONLY — no SDK, no Solana RPC crates, compiles
-# fast and clean. Real venues are opt-in because they pull heavy, version-
-# sensitive dependency trees.
+# Default build = simulator. The lightweight Solana v3 type crates
+# (pubkey/keypair/signer) are always present for config + venue structs, but the
+# heavy RPC client + Orca SDK are pulled only with --features orca.
 default = []
-# Orca pulls in orca_whirlpools 8.0.0 which REQUIRES Solana v3 crates. Enabling
-# this will conflict with the solana 2.0 pins below — see the note at the bottom
-# of this file. Build with: cargo build --features orca
-orca = ["dep:orca_whirlpools", "dep:orca_whirlpools_core", "dep:solana-client", "dep:solana-pubkey", "dep:solana-keypair"]
+orca = ["dep:orca_whirlpools", "dep:orca_whirlpools_core", "dep:solana-client"]
 raydium = []
 
 [dependencies]
@@ -41,34 +38,24 @@ async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 rust_decimal = "1"
 
-# ---- Simulator-path Solana types (v2) ----
-# Used by config.rs + raydium stub for Pubkey/Keypair when NOT building --features orca.
-solana-sdk = "2.0"
+# ---- Solana v3 base types (always on) ----
+# Lightweight, no full validator deps. Used by config.rs + venue structs.
+# NOTE: v3 removed Keypair::from_bytes; we use Keypair::try_from(&[u8]).
+solana-pubkey  = "3"
+solana-keypair = "3"
+solana-signer  = "3"
 
-# ---- Orca-path deps (optional, v3) ----
-# Only compiled with --features orca.
+# ---- Orca-path heavy deps (optional) ----
 orca_whirlpools      = { version = "8.0.0", optional = true }
 orca_whirlpools_core = { version = "2.1",   optional = true }
-solana-client  = { version = "3", optional = true }
-solana-pubkey  = { version = "3", optional = true }
-solana-keypair = { version = "3", optional = true }
+solana-client        = { version = "3",     optional = true }
 
 # ===========================================================================
-# DEPENDENCY VERSION NOTE — READ BEFORE `cargo build --features orca`
-# ===========================================================================
-# orca_whirlpools 8.0.0 depends on the Solana *v3* split crates (solana-client
-# ^3, solana-pubkey ^3, solana-keypair ^3, ...). The simulator/raydium path
-# above pins solana-sdk = "2.0". You CANNOT have both v2 and v3 of the Solana
-# crates in one build.
-#
-# To build the real Orca path you must migrate the whole crate to Solana v3:
-#   1. Remove `solana-sdk = "2.0"`.
-#   2. Replace solana_sdk::pubkey::Pubkey   -> solana_pubkey::Pubkey
-#      and    solana_sdk::signature::Keypair -> solana_keypair::Keypair
-#      in src/config.rs and src/venues/raydium.rs.
-#   3. Make solana-pubkey / solana-keypair non-optional (or part of default).
-#   4. `cargo update` and resolve any transitive pins (see orca_whirlpools_docs
-#      note about `cargo update solana-program:<v> --precise <v>`).
-#
-# The simulator (default build, no features) is unaffected and compiles today.
+# VERSION NOTE
+# Entire crate is on Solana v3 split crates. orca_whirlpools 8.0.0 also targets
+# v3, so --features orca is now version-consistent. If cargo reports a
+# transitive solana-program/anchor conflict on first build, apply the lockfile
+# patch from the orca docs:
+#   cargo update solana-program:<current> --precise <required>
+# (patch anchor first, then solana-program, if both complain).
 # ===========================================================================

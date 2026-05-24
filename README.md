@@ -26,25 +26,31 @@ WebSocket.
 | Venue | Status |
 |---|---|
 | **Simulated** | ✅ Fully working. Real price walk, real position, real IL realized on recenter, real (configurable) fees. The entire bot + UI runs against this today. |
-| **Orca Whirlpools** | 🟡 `fetch_state` wired against the real `orca_whirlpools` 8.0.0 API (pool fetch + position fetch). Liquidity→token-amount conversion and the open/close/recenter instruction sending are still TODO. Build with `--features orca`. |
+| **Orca Whirlpools** | 🟡 `fetch_state` wired against the real `orca_whirlpools` 8.0.0 API; crate migrated to Solana v3 so `--features orca` is version-consistent. Liquidity→token-amount conversion and instruction sending still TODO. |
 | **Raydium CLMM** | 🔧 Wiring template. Trait implemented; on-chain calls are marked TODO. Build with `--features raydium`. |
 
 ### Building the Orca path
 
-The default build is the **simulator only** — no Solana SDK, compiles clean:
+The default build is the **simulator** — no heavy SDK, compiles fast:
 
 ```
-cargo build            # simulator
-cargo build --features orca   # real Orca path (see version note below)
+cargo build                   # simulator
+cargo build --features orca   # real Orca path
 ```
 
-⚠️ `orca_whirlpools` 8.0.0 requires the **Solana v3** crates, while the default
-build pins **Solana v2** for the simulator. You can't have both in one build.
-`Cargo.toml` has a step-by-step note for migrating the crate to v3 (swap
-`solana_sdk::pubkey::Pubkey` → `solana_pubkey::Pubkey` etc.). Until you do that
-migration, `--features orca` will not compile — this is called out honestly
-rather than hidden, because it's a real dependency conflict you resolve once on
-your machine where you can run `cargo update`.
+The crate is on the **Solana v3** split crates throughout (`solana-pubkey`,
+`solana-keypair`, `solana-signer`), which is what `orca_whirlpools` 8.0.0
+targets — so `--features orca` is version-consistent. Note v3 removed
+`Keypair::from_bytes`; the code uses `Keypair::try_from(&[u8])`. If cargo reports
+a transitive `solana-program`/`anchor` pin conflict on first build, apply the
+lockfile patch from the Orca docs (`cargo update solana-program:<cur> --precise
+<req>`).
+
+Even with `--features orca` compiling, two things inside `fetch_state` remain to
+verify/finish against the live 8.0.0 docs: the `PositionOrBundle` variant + field
+names (marked EXTRAPOLATED in `orca.rs`), and the liquidity→token-amount
+conversion (inventory is reported as 0 until wired, rather than fabricated). The
+open/close/recenter instruction sending is also still TODO.
 
 ---
 

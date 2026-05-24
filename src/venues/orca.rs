@@ -37,6 +37,7 @@ use orca_whirlpools_core::{sqrt_price_to_price, tick_index_to_price};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
+use solana_signer::Signer;
 
 /// Orca needs the two token mints + tick spacing to resolve a pool (the
 /// high-level fetch is by token-pair + spacing, not by pool address).
