@@ -50,6 +50,15 @@ pub struct Config {
     /// Decimals of token B.
     #[serde(default)]
     pub orca_decimals_b: u8,
+    /// Max deposit of token A (raw base units) when opening/funding a position.
+    #[serde(default)]
+    pub orca_deposit_max_a: u64,
+    /// Max deposit of token B (raw base units).
+    #[serde(default)]
+    pub orca_deposit_max_b: u64,
+    /// Slippage tolerance (bps) for open/close quotes.
+    #[serde(default = "default_slippage")]
+    pub orca_slippage_bps: u16,
 
     /// Path to the wallet keypair JSON (Solana CLI format). Never committed.
     #[serde(default)]
@@ -95,6 +104,7 @@ fn default_cooldown() -> u64 { 300 }
 fn default_dry_run() -> bool { true }
 fn default_sim_price() -> f64 { 100.0 }
 fn default_port() -> u16 { 8787 }
+fn default_slippage() -> u16 { 100 }
 
 impl Config {
     pub fn load(path: &str) -> Result<Self> {

@@ -41,6 +41,9 @@ pub fn build(cfg: &Config) -> Result<Arc<dyn Venue>> {
                     cfg.orca_tick_spacing,
                     cfg.orca_decimals_a,
                     cfg.orca_decimals_b,
+                    cfg.orca_deposit_max_a,
+                    cfg.orca_deposit_max_b,
+                    cfg.orca_slippage_bps,
                     wallet,
                     cfg.dry_run,
                 )))

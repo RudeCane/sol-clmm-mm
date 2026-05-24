@@ -10,7 +10,7 @@ license = "MIT"
 # (pubkey/keypair/signer) are always present for config + venue structs, but the
 # heavy RPC client + Orca SDK are pulled only with --features orca.
 default = []
-orca = ["dep:orca_whirlpools", "dep:orca_whirlpools_core", "dep:solana-client"]
+orca = ["dep:orca_whirlpools", "dep:orca_whirlpools_core", "dep:solana-client", "dep:solana-instruction", "dep:solana-message", "dep:solana-transaction"]
 raydium = []
 
 [dependencies]
@@ -49,6 +49,9 @@ solana-signer  = "3"
 orca_whirlpools      = { version = "8.0.0", optional = true }
 orca_whirlpools_core = { version = "2.1",   optional = true }
 solana-client        = { version = "3",     optional = true }
+solana-instruction   = { version = "3",     optional = true }
+solana-message       = { version = "3",     optional = true }
+solana-transaction   = { version = "3",     optional = true }
 
 # ===========================================================================
 # VERSION NOTE

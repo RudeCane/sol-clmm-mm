@@ -32,7 +32,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use orca_whirlpools::{
-    fetch_concentrated_liquidity_pool, fetch_positions_for_owner, PoolInfo, PositionOrBundle,
+    close_position_instructions, fetch_concentrated_liquidity_pool, fetch_positions_for_owner,
+    open_position_instructions, IncreaseLiquidityParam, OpenPositionConfig, PoolInfo,
+    PositionOrBundle,
 };
 use orca_whirlpools_core::{tick_index_to_price, try_get_token_estimates_from_liquidity};
 use solana_client::nonblocking::rpc_client::RpcClient;
@@ -50,6 +52,11 @@ pub struct OrcaVenue {
     /// Decimals for token A and B, to convert raw amounts -> UI amounts.
     decimals_a: u8,
     decimals_b: u8,
+    /// Max deposit amounts (raw base units) used when opening/funding a position.
+    deposit_max_a: u64,
+    deposit_max_b: u64,
+    /// Slippage tolerance in bps for open/close quotes.
+    slippage_bps: u16,
     wallet: Arc<Keypair>,
     dry_run: bool,
 }
@@ -63,6 +70,9 @@ impl OrcaVenue {
         tick_spacing: u16,
         decimals_a: u8,
         decimals_b: u8,
+        deposit_max_a: u64,
+        deposit_max_b: u64,
+        slippage_bps: u16,
         wallet: Arc<Keypair>,
         dry_run: bool,
     ) -> Self {
@@ -73,6 +83,9 @@ impl OrcaVenue {
             tick_spacing,
             decimals_a,
             decimals_b,
+            deposit_max_a,
+            deposit_max_b,
+            slippage_bps,
             wallet,
             dry_run,
         }
@@ -175,25 +188,217 @@ impl Venue for OrcaVenue {
         })
     }
 
-    async fn ensure_position(&self, _half_width_bps: u32) -> Result<()> {
-        // Build with open_position_instructions(rpc, whirlpool, lower_price,
-        // upper_price, liquidity_param, slippage, funder) then sign+send.
-        // Honor dry_run: log + return Ok without sending.
-        if self.dry_run {
-            tracing::warn!("Orca ensure_position: dry_run, not opening");
+    async fn ensure_position(&self, half_width_bps: u32) -> Result<()> {
+        // If a position for this pool already exists, nothing to do.
+        let state = self.fetch_state().await?;
+        if state.has_position() {
             return Ok(());
         }
-        let _ = &self.wallet;
-        bail!("Orca ensure_position: instruction wiring not yet completed")
+        let price = state.price;
+        let (lower, upper) = half_width_bounds(price, half_width_bps);
+
+        let param = IncreaseLiquidityParam {
+            token_max_a: self.deposit_max_a,
+            token_max_b: self.deposit_max_b,
+        };
+        let config = OpenPositionConfig {
+            slippage_tolerance_bps: Some(self.slippage_bps),
+            funder: Some(self.wallet.pubkey()),
+            whirlpool_deployment: None,
+        };
+
+        let pool = self.pool_address().await?;
+        let open = open_position_instructions(&self.rpc, pool, lower, upper, param, config)
+            .await
+            .map_err(|e| anyhow!("open_position_instructions: {e}"))?;
+
+        if self.dry_run {
+            tracing::warn!(
+                "Orca ensure_position: dry_run, NOT sending {} ix (mint would be {})",
+                open.instructions.len(),
+                open.position_mint
+            );
+            return Ok(());
+        }
+
+        let sig = self
+            .send(open.instructions, open.additional_signers)
+            .await?;
+        tracing::info!(%sig, mint = %open.position_mint, "opened position");
+        Ok(())
     }
 
-    async fn recenter(&self, _half_width_bps: u32) -> Result<RebalanceReceipt> {
+    async fn recenter(&self, half_width_bps: u32) -> Result<RebalanceReceipt> {
+        // Need the current position's mint to close it. fetch its mint first.
+        let (pool_addr, position_mint, value_before_b) = self.current_position().await?;
+
+        // 1. Close: collects fees+rewards, removes liquidity, closes the account.
+        let close = close_position_instructions(
+            &self.rpc,
+            position_mint,
+            Some(self.slippage_bps),
+            Some(self.wallet.pubkey()),
+        )
+        .await
+        .map_err(|e| anyhow!("close_position_instructions: {e}"))?;
+
+        // 2. Open recentered position around current price.
+        let price = self.price_now().await?;
+        let (lower, upper) = half_width_bounds(price, half_width_bps);
+        let param = IncreaseLiquidityParam {
+            token_max_a: self.deposit_max_a,
+            token_max_b: self.deposit_max_b,
+        };
+        let config = OpenPositionConfig {
+            slippage_tolerance_bps: Some(self.slippage_bps),
+            funder: Some(self.wallet.pubkey()),
+            whirlpool_deployment: None,
+        };
+        let open = open_position_instructions(&self.rpc, pool_addr, lower, upper, param, config)
+            .await
+            .map_err(|e| anyhow!("open_position_instructions: {e}"))?;
+
         if self.dry_run {
-            bail!("Orca recenter called in dry_run — real tx path not yet wired");
+            bail!(
+                "Orca recenter: dry_run, NOT sending (close {} ix + open {} ix, new range [{:.6}, {:.6}])",
+                close.instructions.len(),
+                open.instructions.len(),
+                lower,
+                upper
+            );
         }
-        // decrease_liquidity_instructions -> close_position_instructions ->
-        // open_position_instructions -> increase_liquidity_instructions, each
-        // signed with self.wallet and sent via self.rpc; collect sigs + costs.
-        bail!("Orca recenter: instruction wiring not yet completed")
+
+        // Send as two separate transactions: close, then open. Keeping them
+        // separate avoids exceeding the tx size/CU limits and means a failed
+        // open doesn't strand a half-closed position.
+        let mut signatures = Vec::new();
+        let close_sig = self
+            .send(close.instructions, close.additional_signers)
+            .await
+            .map_err(|e| anyhow!("send close tx: {e}"))?;
+        signatures.push(close_sig.clone());
+
+        let open_sig = self
+            .send(open.instructions, open.additional_signers)
+            .await
+            .map_err(|e| anyhow!("send open tx (position was CLOSED, funds in wallet): {e}"))?;
+        signatures.push(open_sig);
+
+        // Realized PnL: the close quote tells us what we got back; compare to the
+        // value the position had when this loop last opened it. We approximate
+        // realized in token-B terms using the close quote's token estimates.
+        let got_b = close.quote.token_est_b as f64 / 10f64.powi(self.decimals_b as i32);
+        let got_a = close.quote.token_est_a as f64 / 10f64.powi(self.decimals_a as i32);
+        let value_after_b = got_b + got_a * price;
+        let realized_pnl_b = value_after_b - value_before_b;
+
+        // Cost of the rebalance: the new position's initialization cost (rent
+        // for the position NFT + token accounts), in lamports -> SOL. This is
+        // NOT in token-B terms; we report SOL cost here and label it as such in
+        // the dashboard log. (Some rent is reclaimed by the close; net cost is
+        // typically just tx fees + any non-reclaimable rent. Treat as an upper
+        // bound.) If you want this in token-B terms, multiply by a SOL/token-B
+        // price you fetch separately.
+        let cost_b = open.initialization_cost as f64 / 1e9;
+
+        Ok(RebalanceReceipt {
+            new_lower: lower,
+            new_upper: upper,
+            realized_pnl_b,
+            cost_b,
+            signatures,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Compute lower/upper price bounds for a half-width in bps around `price`.
+fn half_width_bounds(price: f64, half_width_bps: u32) -> (f64, f64) {
+    let w = half_width_bps as f64 / 10_000.0;
+    (price * (1.0 - w), price * (1.0 + w))
+}
+
+impl OrcaVenue {
+    /// Resolve this venue's whirlpool address from the token pair + spacing.
+    async fn pool_address(&self) -> Result<Pubkey> {
+        match fetch_concentrated_liquidity_pool(
+            &self.rpc,
+            self.token_a,
+            self.token_b,
+            self.tick_spacing,
+            None,
+        )
+        .await
+        .map_err(|e| anyhow!("fetch pool: {e}"))?
+        {
+            PoolInfo::Initialized(p) => Ok(p.address),
+            PoolInfo::Uninitialized(_) => bail!("pool not initialized"),
+        }
+    }
+
+    async fn price_now(&self) -> Result<f64> {
+        Ok(self.fetch_state().await?.price)
+    }
+
+    /// Find the wallet's current position in this pool: returns
+    /// (pool_address, position_mint, current_value_in_b).
+    async fn current_position(&self) -> Result<(Pubkey, Pubkey, f64)> {
+        let pool = self.pool_address().await?;
+        let state = self.fetch_state().await?;
+        let value_b = state.inventory_b + state.inventory_a * state.price;
+
+        let positions = fetch_positions_for_owner(&self.rpc, self.wallet.pubkey(), None)
+            .await
+            .map_err(|e| anyhow!("fetch_positions_for_owner: {e}"))?;
+        for pos in positions {
+            if let PositionOrBundle::Position(hydrated) = pos {
+                if hydrated.data.whirlpool == pool {
+                    // EXTRAPOLATED field: the NFT mint of the position. On the
+                    // generated Position account this is `position_mint`.
+                    return Ok((pool, hydrated.data.position_mint, value_b));
+                }
+            }
+        }
+        bail!("no open position to recenter")
+    }
+
+    /// Build, sign, and send+confirm a v3 transaction from instructions plus
+    /// any extra signers the builder returned (e.g. the new position mint).
+    async fn send(
+        &self,
+        instructions: Vec<solana_instruction::Instruction>,
+        additional_signers: Vec<Keypair>,
+    ) -> Result<String> {
+        use solana_message::Message;
+        use solana_transaction::Transaction;
+
+        let blockhash = self
+            .rpc
+            .get_latest_blockhash()
+            .await
+            .map_err(|e| anyhow!("get_latest_blockhash: {e}"))?;
+
+        let payer = self.wallet.pubkey();
+        let msg = Message::new(&instructions, Some(&payer));
+
+        // Signers: wallet first (payer), then any additional signers.
+        let mut signers: Vec<&Keypair> = vec![self.wallet.as_ref()];
+        for kp in &additional_signers {
+            signers.push(kp);
+        }
+
+        let mut tx = Transaction::new_unsigned(msg);
+        tx.try_sign(&signers, blockhash)
+            .map_err(|e| anyhow!("sign tx: {e}"))?;
+
+        let sig = self
+            .rpc
+            .send_and_confirm_transaction(&tx)
+            .await
+            .map_err(|e| anyhow!("send_and_confirm: {e}"))?;
+        Ok(sig.to_string())
     }
 }
