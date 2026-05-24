@@ -26,7 +26,7 @@ WebSocket.
 | Venue | Status |
 |---|---|
 | **Simulated** | ✅ Fully working. Real price walk, real position, real IL realized on recenter, real (configurable) fees. The entire bot + UI runs against this today. |
-| **Orca Whirlpools** | 🟡 `fetch_state` fully wired against `orca_whirlpools` 8.0.0: pool price, position range bounds, **and real inventory** (via `try_get_token_estimates_from_liquidity`) + fees. Crate is on Solana v3. Only the open/close/recenter instruction *sending* remains TODO. |
+| **Orca Whirlpools** | ✅ Read + write paths wired against `orca_whirlpools` 8.0.0 and verified against live devnet: `fetch_state` (price, range, real inventory, fees), plus `ensure_position` and `recenter` (close+open) building and signing real transactions, gated by `dry_run`. Build with `--features orca`. |
 | **Raydium CLMM** | 🔧 Wiring template. Trait implemented; on-chain calls are marked TODO. Build with `--features raydium`. |
 
 ### Building the Orca path
@@ -41,18 +41,110 @@ cargo build --features orca   # real Orca path
 The crate is on the **Solana v3** split crates throughout (`solana-pubkey`,
 `solana-keypair`, `solana-signer`), which is what `orca_whirlpools` 8.0.0
 targets — so `--features orca` is version-consistent. Note v3 removed
-`Keypair::from_bytes`; the code uses `Keypair::try_from(&[u8])`. If cargo reports
-a transitive `solana-program`/`anchor` pin conflict on first build, apply the
-lockfile patch from the Orca docs (`cargo update solana-program:<cur> --precise
-<req>`).
+`Keypair::from_bytes`; the code uses `Keypair::try_from(&[u8])`. If cargo reports a transitive `solana-program`/`anchor` pin conflict on first
+build, apply the lockfile patch from the Orca docs (`cargo update
+solana-program:<cur> --precise <req>`).
 
-Even with `--features orca` compiling, the things left in `orca.rs`: the
-position data struct's exact field names (`.liquidity`, `.tick_lower_index`,
-etc.) follow the Whirlpool program's Position account — confirm against
-`orca_whirlpools_client`'s generated `Position` for 8.0.0 if the compiler
-disagrees — and the open/close/recenter instruction *sending* is still TODO
-(the builders exist; signing + submitting the tx is unwired). `fetch_state`
-itself, including real inventory from position liquidity, is complete.
+---
+
+## Running it against Orca (devnet → mainnet)
+
+The simulator needs no setup. To run the **real Orca venue**, you configure
+three things in `config.toml`: a **wallet**, the **token pair** to make markets
+in, and **deposit amounts**. There is no separate wallet store or UI — the bot
+reads everything from `config.toml` at startup.
+
+### 1. Install the Solana CLI (for creating/funding wallets)
+
+Windows (PowerShell):
+
+```powershell
+cmd /c "curl https://release.anza.xyz/stable/solana-install-init-x86_64-pc-windows-msvc.exe --output C:\solana-install-tmp\solana-install-init.exe --create-dirs"
+C:\solana-install-tmp\solana-install-init.exe stable
+# restart the shell, or add to PATH for this session:
+$env:Path += ";$env:USERPROFILE\.local\share\solana\install\active_release\bin"
+solana-keygen --version
+```
+
+### 2. Create and fund a wallet
+
+Use a **throwaway keypair** for devnet, never a real key:
+
+```powershell
+solana-keygen new -o devnet-throwaway.json --no-bip39-passphrase
+solana airdrop 2 (solana-keygen pubkey devnet-throwaway.json) --url devnet
+```
+
+**The wallet must hold the tokens it will deposit.** A concentrated-liquidity
+position deposits *both* tokens of the pair (or one, depending on where the
+price sits relative to your range). An airdrop gives you SOL only — if your pair
+is SOL/USDC you also need some USDC in the wallet, or the open will fail with an
+insufficient-funds error at send time. (On devnet, getting the quote token means
+swapping or minting it; on mainnet you fund the wallet with both real tokens.)
+
+### 3. Configure `config.toml`
+
+Start from the devnet template:
+
+```powershell
+copy config.devnet.toml config.toml
+```
+
+The lines that matter:
+
+```toml
+venue        = "orca"
+rpc_url      = "https://api.devnet.solana.com"
+orca_network = "devnet"                 # MUST match the rpc_url's cluster
+
+wallet_path  = "devnet-throwaway.json"  # THE WALLET — path to the keypair file
+
+# THE PAIR being market-made — the two token mints + tick spacing identify the pool:
+orca_token_a      = "So11111111111111111111111111111111111111112"  # e.g. wSOL
+orca_token_b      = "BRjpCHtyQLNCo8gqRUr8jtdAj5AjPYQaoqbvcZiHok1k"  # e.g. devUSDC
+orca_tick_spacing = 64
+orca_decimals_a   = 9
+orca_decimals_b   = 6
+
+# DEPOSIT amounts (raw base units). These tokens MUST be in the wallet.
+orca_deposit_max_a = 0
+orca_deposit_max_b = 1000000            # 1 devUSDC (6 decimals)
+
+dry_run = true                          # keep TRUE until you've watched a clean run
+```
+
+To market-make a **different pair**, change `orca_token_a`/`orca_token_b`, the
+matching `tick_spacing`, the decimals, and the deposit amounts — and make sure
+the wallet holds those tokens.
+
+### 4. Dry-run first (sends nothing)
+
+```powershell
+cargo run --features orca
+# open http://127.0.0.1:8787 and click Start
+```
+
+With `dry_run = true`, the bot reads live pool state (you'll see a real price and
+inventory on the dashboard) and **logs the transactions it would send without
+sending them**, e.g.:
+
+```
+Orca ensure_position: dry_run, NOT sending 6 ix (mint would be Emp...)
+```
+
+That confirms the read path talks to the live cluster and the write path builds
+valid transactions. Watch a few ticks before going further.
+
+### 5. Go live (sends real transactions)
+
+Only after a clean dry-run, and only once the wallet holds the deposit tokens:
+set `dry_run = false` and re-run. Now Start/Recenter actually open and rebalance
+positions on-chain.
+
+**Order of operations, always:** devnet with a throwaway wallet first → confirm a
+real open + recenter works end to end → only then point `rpc_url`/`orca_network`
+at mainnet with a real wallet and real funds. Every recenter realizes impermanent
+loss and pays fees (see the warning below); start with small deposits.
 
 ---
 

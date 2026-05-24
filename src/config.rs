@@ -125,12 +125,28 @@ impl Config {
         if self.half_width_bps == 0 {
             anyhow::bail!("half_width_bps must be > 0");
         }
-        if self.venue != VenueKind::Simulated {
-            if self.pool.is_empty() {
-                anyhow::bail!("pool address required for venue {:?}", self.venue);
+        match self.venue {
+            VenueKind::Simulated => {}
+            VenueKind::Orca => {
+                // Orca resolves the pool by token pair + tick spacing, not a
+                // pool address.
+                if self.orca_token_a.is_empty() || self.orca_token_b.is_empty() {
+                    anyhow::bail!("orca_token_a and orca_token_b are required for venue Orca");
+                }
+                if self.orca_tick_spacing == 0 {
+                    anyhow::bail!("orca_tick_spacing must be > 0 for venue Orca");
+                }
+                if self.wallet_path.is_empty() {
+                    anyhow::bail!("wallet_path required for venue Orca");
+                }
             }
-            if self.wallet_path.is_empty() {
-                anyhow::bail!("wallet_path required for venue {:?}", self.venue);
+            VenueKind::Raydium => {
+                if self.pool.is_empty() {
+                    anyhow::bail!("pool address required for venue Raydium");
+                }
+                if self.wallet_path.is_empty() {
+                    anyhow::bail!("wallet_path required for venue Raydium");
+                }
             }
         }
         Ok(())
