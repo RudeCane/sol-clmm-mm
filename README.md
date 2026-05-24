@@ -26,7 +26,7 @@ WebSocket.
 | Venue | Status |
 |---|---|
 | **Simulated** | ✅ Fully working. Real price walk, real position, real IL realized on recenter, real (configurable) fees. The entire bot + UI runs against this today. |
-| **Orca Whirlpools** | 🟡 `fetch_state` wired against the real `orca_whirlpools` 8.0.0 API; crate migrated to Solana v3 so `--features orca` is version-consistent. Liquidity→token-amount conversion and instruction sending still TODO. |
+| **Orca Whirlpools** | 🟡 `fetch_state` fully wired against `orca_whirlpools` 8.0.0: pool price, position range bounds, **and real inventory** (via `try_get_token_estimates_from_liquidity`) + fees. Crate is on Solana v3. Only the open/close/recenter instruction *sending* remains TODO. |
 | **Raydium CLMM** | 🔧 Wiring template. Trait implemented; on-chain calls are marked TODO. Build with `--features raydium`. |
 
 ### Building the Orca path
@@ -46,11 +46,13 @@ a transitive `solana-program`/`anchor` pin conflict on first build, apply the
 lockfile patch from the Orca docs (`cargo update solana-program:<cur> --precise
 <req>`).
 
-Even with `--features orca` compiling, two things inside `fetch_state` remain to
-verify/finish against the live 8.0.0 docs: the `PositionOrBundle` variant + field
-names (marked EXTRAPOLATED in `orca.rs`), and the liquidity→token-amount
-conversion (inventory is reported as 0 until wired, rather than fabricated). The
-open/close/recenter instruction sending is also still TODO.
+Even with `--features orca` compiling, the things left in `orca.rs`: the
+position data struct's exact field names (`.liquidity`, `.tick_lower_index`,
+etc.) follow the Whirlpool program's Position account — confirm against
+`orca_whirlpools_client`'s generated `Position` for 8.0.0 if the compiler
+disagrees — and the open/close/recenter instruction *sending* is still TODO
+(the builders exist; signing + submitting the tx is unwired). `fetch_state`
+itself, including real inventory from position liquidity, is complete.
 
 ---
 

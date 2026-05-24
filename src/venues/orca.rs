@@ -1,39 +1,40 @@
 //! Orca Whirlpools venue — targets the `orca_whirlpools` high-level SDK v8.0.0.
 //!
 //! ==========================================================================
-//! STATUS (be precise about what's verified vs extrapolated):
+//! STATUS (precise about verified vs to-confirm):
 //!  - `fetch_state` is wired against the REAL, doc-verified v8.0.0 API:
 //!      * fetch_concentrated_liquidity_pool(rpc, token_a, token_b, tick_spacing,
 //!        deployment) -> PoolInfo::Initialized(InitializedPool { address, data, price })
 //!      * fetch_positions_for_owner(rpc, owner, deployment) -> Vec<PositionOrBundle>
-//!    The pool price arrives as a ready f64 (no manual sqrt-price math needed).
-//!  - The position->price-bound conversion and the exact PositionOrBundle field
-//!    names are marked EXTRAPOLATED below: verify against
-//!    https://docs.rs/orca_whirlpools/8.0.0 and orca_whirlpools_core
-//!    (price_to_tick_index / tick_index_to_price) before mainnet use.
+//!      * tick_index_to_price(tick, dec_a, dec_b) -> f64  [arg order VERIFIED]
+//!      * try_get_token_estimates_from_liquidity(liquidity, sqrt_price,
+//!        tick_lo, tick_hi, round_up) -> Result<(u64 A, u64 B)>  [sig VERIFIED]
+//!    Pool price arrives as a ready f64; inventory is computed from position
+//!    liquidity + current sqrt_price (real balances, no fabrication).
+//!  - TO CONFIRM: the exact field names on the position data struct
+//!    (`.whirlpool`, `.liquidity`, `.tick_lower_index`, `.tick_upper_index`,
+//!    `.fee_owed_b`) follow the Whirlpool program's Position account; check
+//!    against orca_whirlpools_client's generated `Position` for 8.0.0 if the
+//!    compiler disagrees.
 //!  - `ensure_position` / `recenter` remain instruction-wiring TODOs: the
-//!    open/close/increase/decrease instruction builders exist
-//!    (open_position_instructions, decrease_liquidity_instructions,
-//!    close_position_instructions, increase_liquidity_instructions) but building
-//!    + signing + sending the tx is left to you so it can be checked against the
-//!    exact builder return shapes.
+//!    builders exist (open_position_instructions, decrease_liquidity_instructions,
+//!    close_position_instructions, increase_liquidity_instructions) but
+//!    building + signing + sending the tx is left to wire against the exact
+//!    builder return shapes.
 //!
-//! IMPORTANT — dependency versions: orca_whirlpools 8.0.0 pulls in Solana v3
-//! crates (solana-client ^3, solana-keypair ^3, ...). The workspace Cargo.toml
-//! currently pins solana 2.0 for the simulator-only build. Building the real
-//! Orca path requires bumping those to 3.x; see the `orca` feature note in
-//! Cargo.toml. This file is gated behind `#[cfg(feature = "orca")]`.
+//! Dependency versions: crate is on Solana v3 split crates throughout, matching
+//! orca_whirlpools 8.0.0. Gated behind `#[cfg(feature = "orca")]`.
 //! ==========================================================================
 
 use super::{PoolState, RebalanceReceipt, Venue};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
 
 use orca_whirlpools::{
     fetch_concentrated_liquidity_pool, fetch_positions_for_owner, PoolInfo, PositionOrBundle,
 };
-use orca_whirlpools_core::{sqrt_price_to_price, tick_index_to_price};
+use orca_whirlpools_core::{tick_index_to_price, try_get_token_estimates_from_liquidity};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -106,10 +107,15 @@ impl Venue for OrcaVenue {
 
         // High-level SDK hands us price as a ready f64.
         let price = pool.price;
+        // Current sqrt price (Q64.64) lives in the Whirlpool account data; needed
+        // for the liquidity->token-amount estimate below.
+        let current_sqrt_price: u128 = pool.data.sqrt_price;
 
-        // --- Position: VERIFIED fetch, EXTRAPOLATED field access -------------
-        // fetch_positions_for_owner returns every position the wallet owns
-        // across all pools; we filter to this pool by whirlpool address.
+        // --- Position fetch: VERIFIED API. Field access on the position data
+        // struct (`.whirlpool`, `.liquidity`, `.tick_lower_index`,
+        // `.tick_upper_index`, `.fee_owed_b`) follows the Whirlpool program's
+        // Position account; confirm exact names against orca_whirlpools_client
+        // generated `Position` for 8.0.0 if the compiler complains. ----------
         let positions = fetch_positions_for_owner(&self.rpc, self.wallet.pubkey(), None)
             .await
             .map_err(|e| anyhow!("fetch_positions_for_owner: {e}"))?;
@@ -121,41 +127,43 @@ impl Venue for OrcaVenue {
         let mut fees_accrued_b = 0.0;
 
         for pos in positions {
-            // EXTRAPOLATED: PositionOrBundle is an enum of a standalone Position
-            // vs a PositionBundle. We only handle standalone here. Verify the
-            // variant name + inner field names (`.position`, `.data`, etc.)
-            // against the v8.0.0 docs — they are NOT confirmed in this draft.
+            // We only handle standalone positions (not bundles) here.
             if let PositionOrBundle::Position(hydrated) = pos {
-                let data = &hydrated.data; // Position account data
+                let data = &hydrated.data;
                 if data.whirlpool != pool.address {
                     continue;
                 }
-                // tick_index_to_price(tick, decimals_a, decimals_b) -> f64
-                // (function exists in orca_whirlpools_core; arg order verified
-                // by example in core docs).
-                range_lower = Some(tick_index_to_price(
-                    data.tick_lower_index,
-                    self.decimals_a,
-                    self.decimals_b,
-                ));
-                range_upper = Some(tick_index_to_price(
-                    data.tick_upper_index,
-                    self.decimals_a,
-                    self.decimals_b,
-                ));
-                // EXTRAPOLATED: liquidity -> token amounts needs
-                // orca_whirlpools_core::get_token_amounts_from_liquidity(...)
-                // using current sqrt_price + tick bounds. Left as a follow-up;
-                // for now we surface fees and leave inventory at 0 until that
-                // conversion is wired, so the dashboard is honest rather than
-                // showing fabricated balances.
-                let _ = (&mut inventory_a, &mut inventory_b);
-                fees_accrued_b = (data.fee_owed_b as f64) / 10f64.powi(self.decimals_b as i32);
+                let lower_tick = data.tick_lower_index;
+                let upper_tick = data.tick_upper_index;
+
+                // Price bounds: tick_index_to_price arg order VERIFIED in core docs.
+                range_lower = Some(tick_index_to_price(lower_tick, self.decimals_a, self.decimals_b));
+                range_upper = Some(tick_index_to_price(upper_tick, self.decimals_a, self.decimals_b));
+
+                // Inventory: VERIFIED core fn. Signature:
+                //   try_get_token_estimates_from_liquidity(
+                //     liquidity_delta: u128, current_sqrt_price: u128,
+                //     tick_lower_index: i32, tick_upper_index: i32, round_up: bool)
+                //   -> Result<(u64 /*A*/, u64 /*B*/), &str>
+                // round_up=false to estimate current holdings (not a max-deposit).
+                match try_get_token_estimates_from_liquidity(
+                    data.liquidity,
+                    current_sqrt_price,
+                    lower_tick,
+                    upper_tick,
+                    false,
+                ) {
+                    Ok((amt_a, amt_b)) => {
+                        inventory_a = amt_a as f64 / 10f64.powi(self.decimals_a as i32);
+                        inventory_b = amt_b as f64 / 10f64.powi(self.decimals_b as i32);
+                    }
+                    Err(e) => tracing::warn!("token estimate failed: {e}"),
+                }
+
+                fees_accrued_b = data.fee_owed_b as f64 / 10f64.powi(self.decimals_b as i32);
                 break;
             }
         }
-
-        let _ = sqrt_price_to_price; // referenced to document availability
 
         Ok(PoolState {
             price,
