@@ -8,13 +8,11 @@
 //!  - `fetch_state`: wired. Price from sqrt_price_x64 (math crate verifies the
 //!    tick<->sqrt-price relationship); inventory from position liquidity +
 //!    tick bounds via get_delta_amounts_signed. The MATH calls are doc-verified.
-//!  - ⚠️ ACCOUNT LAYOUT IS THE RISK. Raydium PoolState / PersonalPositionState
-//!    are Anchor accounts (8-byte discriminator + borsh body). The field
-//!    OFFSETS below are derived from raydium-amm-v3's state structs and MUST be
-//!    verified against the on-chain source for the program you target:
-//!      https://github.com/raydium-io/raydium-clmm  (programs/amm/src/states/)
-//!    A wrong offset yields silently-wrong numbers (worse than a panic), so
-//!    these are marked and isolated in the decode fns below.
+//!  - ✅ ACCOUNT OFFSETS VERIFIED against raydium-clmm on-chain structs
+//!    (states/pool.rs + states/personal_position.rs), cross-checked against an
+//!    independent parser (Shyft PoolLayout). Pool price + position bounds +
+//!    inventory decode at correct offsets. Note the u32 padding after
+//!    tick_current in PoolState (accounted for; we read fields before it).
 //!  - `ensure_position` / `recenter`: instruction building against Raydium's
 //!    Anchor program is the next step (open_position / increase_liquidity /
 //!    decrease_liquidity / close_position discriminators + account metas).
@@ -108,16 +106,17 @@ fn read_pubkey(buf: &[u8], off: usize) -> Result<Pubkey> {
 
 impl RaydiumVenue {
     /// Decode the PoolState fields we need.
-    /// OFFSETS (VERIFY): PoolState layout in raydium-amm-v3 places, after the
-    /// 8-byte discriminator: bump[1], amm_config[32], owner[32], token_mint_0[32],
+    /// OFFSETS — VERIFIED against raydium-clmm states/pool.rs field order
+    /// (discriminator[8], bump[1], amm_config[32], owner[32], token_mint_0[32],
     /// token_mint_1[32], token_vault_0[32], token_vault_1[32], observation_key[32],
     /// mint_decimals_0[1], mint_decimals_1[1], tick_spacing[2], liquidity[16],
-    /// sqrt_price_x64[16], tick_current[4], ...
-    /// => sqrt_price_x64 at 8+1+32*7+1+1+2+16 = 269; tick_current at 285.
-    /// These are DERIVED, not verified — confirm against the on-chain struct.
+    /// sqrt_price_x64[16], tick_current[4], ...):
+    ///   liquidity      @ 237
+    ///   sqrt_price_x64 @ 253
+    ///   tick_current   @ 269
     fn decode_pool(buf: &[u8]) -> Result<PoolView> {
-        const SQRT_PRICE_OFF: usize = 269; // VERIFY
-        const TICK_CURRENT_OFF: usize = 285; // VERIFY
+        const SQRT_PRICE_OFF: usize = 253;
+        const TICK_CURRENT_OFF: usize = 269;
         Ok(PoolView {
             sqrt_price_x64: read_u128_le(buf, SQRT_PRICE_OFF)?,
             tick_current: read_i32_le(buf, TICK_CURRENT_OFF)?,
@@ -125,15 +124,18 @@ impl RaydiumVenue {
     }
 
     /// Decode PersonalPositionState fields.
-    /// OFFSETS (VERIFY): after 8-byte discriminator: bump[1], nft_mint[32],
-    /// pool_id[32], tick_lower_index[4], tick_upper_index[4], liquidity[16], ...
-    /// => pool_id at 8+1+32 = 41; tick_lower at 73; tick_upper at 77;
-    ///    liquidity at 81.
+    /// OFFSETS — VERIFIED against raydium-clmm states/personal_position.rs
+    /// (discriminator[8], bump[1], nft_mint[32], pool_id[32], tick_lower_index[4],
+    /// tick_upper_index[4], liquidity[16], ...):
+    ///   pool_id    @ 41
+    ///   tick_lower @ 73
+    ///   tick_upper @ 77
+    ///   liquidity  @ 81
     fn decode_position(buf: &[u8]) -> Result<PositionView> {
-        const POOL_ID_OFF: usize = 41; // VERIFY
-        const TICK_LOWER_OFF: usize = 73; // VERIFY
-        const TICK_UPPER_OFF: usize = 77; // VERIFY
-        const LIQUIDITY_OFF: usize = 81; // VERIFY
+        const POOL_ID_OFF: usize = 41;
+        const TICK_LOWER_OFF: usize = 73;
+        const TICK_UPPER_OFF: usize = 77;
+        const LIQUIDITY_OFF: usize = 81;
         Ok(PositionView {
             pool_id: read_pubkey(buf, POOL_ID_OFF)?,
             tick_lower: read_i32_le(buf, TICK_LOWER_OFF)?,
