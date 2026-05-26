@@ -11,7 +11,7 @@ license = "MIT"
 # heavy RPC client + Orca SDK are pulled only with --features orca.
 default = []
 orca = ["dep:orca_whirlpools", "dep:orca_whirlpools_core", "dep:solana-client", "dep:solana-instruction", "dep:solana-message", "dep:solana-transaction"]
-raydium = []
+raydium = ["dep:solana-clmm-raydium", "dep:solana-client"]
 
 [dependencies]
 # Async runtime
@@ -52,6 +52,10 @@ solana-client        = { version = "3",     optional = true }
 solana-instruction   = { version = "3",     optional = true }
 solana-message       = { version = "3",     optional = true }
 solana-transaction   = { version = "3",     optional = true }
+
+# ---- Raydium-path deps (optional) ----
+# Pure-math crate (no RPC/Anchor) + the shared RPC client.
+solana-clmm-raydium  = { version = "0.3",   optional = true }
 
 # ===========================================================================
 # VERSION NOTE

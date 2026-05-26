@@ -64,6 +64,8 @@ pub fn build(cfg: &Config) -> Result<Arc<dyn Venue>> {
                 Ok(Arc::new(raydium::RaydiumVenue::new(
                     cfg.rpc_url.clone(),
                     pool,
+                    cfg.orca_decimals_a,
+                    cfg.orca_decimals_b,
                     wallet,
                     cfg.dry_run,
                 )))
