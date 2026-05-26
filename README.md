@@ -54,9 +54,29 @@ three things in `config.toml`: a **wallet**, the **token pair** to make markets
 in, and **deposit amounts**. There is no separate wallet store or UI — the bot
 reads everything from `config.toml` at startup.
 
+### 0. Prerequisites (macOS or Windows)
+
+The bot is pure Rust and runs identically on macOS (Apple Silicon or Intel),
+Linux, and Windows. You need Rust (`rustup`) and, for creating/funding wallets,
+the Solana CLI.
+
+Rust, if you don't have it: https://rustup.rs — on macOS that's
+`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`.
+
 ### 1. Install the Solana CLI (for creating/funding wallets)
 
-Windows (PowerShell):
+**macOS / Linux** (zsh/bash):
+
+```bash
+sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+# the installer prints a line to add to PATH; or for this session:
+export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+solana-keygen --version
+```
+
+To make it permanent, add that `export PATH=...` line to `~/.zshrc`.
+
+**Windows** (PowerShell):
 
 ```powershell
 cmd /c "curl https://release.anza.xyz/stable/solana-install-init-x86_64-pc-windows-msvc.exe --output C:\solana-install-tmp\solana-install-init.exe --create-dirs"
@@ -68,10 +88,22 @@ solana-keygen --version
 
 ### 2. Create and fund a wallet
 
-Use a **throwaway keypair** for devnet, never a real key:
+Use a **throwaway keypair** for devnet, never a real key. The `solana-keygen`
+commands are identical on every platform:
+
+```bash
+solana-keygen new -o devnet-throwaway.json --no-bip39-passphrase
+```
+
+Then airdrop. **macOS / Linux:**
+
+```bash
+solana airdrop 2 "$(solana-keygen pubkey devnet-throwaway.json)" --url devnet
+```
+
+**Windows** (PowerShell uses `(...)` instead of `"$(...)"`):
 
 ```powershell
-solana-keygen new -o devnet-throwaway.json --no-bip39-passphrase
 solana airdrop 2 (solana-keygen pubkey devnet-throwaway.json) --url devnet
 ```
 
@@ -82,12 +114,14 @@ is SOL/USDC you also need some USDC in the wallet, or the open will fail with an
 insufficient-funds error at send time. (On devnet, getting the quote token means
 swapping or minting it; on mainnet you fund the wallet with both real tokens.)
 
+
 ### 3. Configure `config.toml`
 
-Start from the devnet template:
+Start from the devnet template (macOS/Linux use `cp`, Windows uses `copy`):
 
-```powershell
-copy config.devnet.toml config.toml
+```bash
+cp config.devnet.toml config.toml      # macOS / Linux
+# copy config.devnet.toml config.toml  # Windows
 ```
 
 The lines that matter:
@@ -123,6 +157,9 @@ the wallet holds those tokens.
 cargo run --features orca
 # open http://127.0.0.1:8787 and click Start
 ```
+
+(On macOS, the first run may pop a firewall prompt because the bot opens a local
+port — click Allow. It only ever binds `127.0.0.1`, so it stays on your machine.)
 
 With `dry_run = true`, the bot reads live pool state (you'll see a real price and
 inventory on the dashboard) and **logs the transactions it would send without
